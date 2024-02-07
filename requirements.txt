@@ -1,5 +1,6 @@
 h5py
 numpy
 scipy
+cupy-cuda11x
 psutil
 cython
