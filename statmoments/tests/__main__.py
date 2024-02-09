@@ -8,7 +8,7 @@ def run_alltests():
   return unittest.TextTestRunner(verbosity=1).run(suite)
 
 
-# Entrance point
+# Entry point
 if __name__ == '__main__':
   res = run_alltests()
   sys.exit(res.wasSuccessful() is False)

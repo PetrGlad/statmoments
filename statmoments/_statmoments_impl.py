@@ -137,9 +137,7 @@ class _BaseImpl(object):
     assert len(traces[0]) == self.trace_len, "Trace has too many features (too long)"
     assert len(classifiers[0]) == self.classifiers_len, "Classifier length should correspond the initial"
 
-    if False:
-      pass
-    elif isinstance(classifiers[0], (u"".__class__, "".__class__)):
+    if isinstance(classifiers[0], (u"".__class__, "".__class__)):
       classifiers = np.asarray(list(map(str2bytes, classifiers)), dtype=np.int8) - ord('0')
     elif isinstance(classifiers[0], bytes):
       if classifiers[0][0] in b'01':

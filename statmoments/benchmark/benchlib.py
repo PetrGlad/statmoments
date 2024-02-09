@@ -60,7 +60,7 @@ def benchmark(test_filter, benchset, repeat=1):
   with open(report_name, newline='\n', mode='w') as report_file:
     report_writer = csv.writer(report_file)
     report_writer.writerow(['test', 'kname', 'memory_b',
-                            'trace_count', 'trace_length', 'classifier_count', 'batch_size',
+                            'trace_count', 'trace_length', 'class_count', 'batch_size',
                             'avg_trace_time_s',
                             'total_update_time_s', 'min_update_time_s', 'max_update_time_s',
                             'total_ttest_time_s', 'min_ttest_time_s', 'max_ttest_time_s',

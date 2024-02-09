@@ -11,15 +11,14 @@ import numpy as np
 import scipy.linalg.blas as scipy_blas
 from scipy.special import binom
 
-cython.declare(USE_VTK = cython.int)
+cython.declare(USE_VTK = cython.bint)
 USE_VTK = 0
-cython.declare(USE_GPU = cython.int)
-USE_GPU = 0
+cython.declare(USE_GPU = cython.bint)
+USE_GPU = 1 ##############################################
 
-def is_vtk_installed():
+def use_vtk():
   if not USE_VTK:
     return False
-
   try:
     import vtk
     print("VTK is installed and used")
@@ -28,9 +27,10 @@ def is_vtk_installed():
     print("VTK is not installed")
     return False
 
-#if USE_GPU:
+########## DENUG ############# if USE_GPU:
 #    from cupy_backends.cuda.libs import cupy_cublas
-#    from cupy import cublas as cupy_cublas
+from cupy import cublas as cupy_blas
+import cupy
 
 
 ################################ BLAS INTEROP ################################
@@ -133,17 +133,21 @@ def ssyrk(A, C, uplo, trans=b'N', alpha=1.0, beta=1.0):
                trans=cython.char, alpha=cython.double, beta=cython.double)
 def dsyrk(A, C, uplo, trans=b'N', alpha=1.0, beta=1.0):
   """ C = alpha * trans(A * A^T) + beta * C """
-  cython.declare(n=cython.int, k=cython.int, lda=cython.int, ldc=cython.int)
-  n = cython.cast(cython.int, C.shape[0])
-  k = cython.cast(cython.int, A.shape[0] if trans == b'N' else A.shape[1])
-  lda = cython.cast(cython.int, A.shape[1])
-  ldc = cython.cast(cython.int, C.shape[1])
+
+  # cython.declare(n=cython.int, k=cython.int, lda=cython.int, ldc=cython.int)
+  # n = cython.cast(cython.int, C.shape[0])
+  # k = cython.cast(cython.int, A.shape[0] if trans == b'N' else A.shape[1])
+  # lda = cython.cast(cython.int, A.shape[1])
+  # ldc = cython.cast(cython.int, C.shape[1])
+
   #assert (A.shape[1] if trans == b'N' else A.shape[0]) == n
   #assert C.shape[1] == n
+  # !!! uplo 'L' and 'U' mixed up (BLAS dsyrk gets transposed matrices).
 
-  # !!! uplo 'L' and 'U' mixed up !!!
+  # if USE_GPU:
+  #   cupy_blas.syrk(trans, A.T, C.T, alpha, beta, 1 if uplo != b'U' else 0)
+  # elif
   if cython.compiled:
-    #    if not USE_GPU:
     cython_blas.dsyrk(cython.address(uplo), cython.address(trans), cython.address(n), cython.address(k),
                       cython.address(alpha), cython.address(A[0, 0]), cython.address(lda),
                       cython.address(beta), cython.address(C[0, 0]), cython.address(ldc))
@@ -163,8 +167,42 @@ def dsyrk(A, C, uplo, trans=b'N', alpha=1.0, beta=1.0):
   #        cython.cast(size_t, cython.address(alpha)), cython.cast(size_t, cython.address(A[0, 0])), lda,
   #        cython.cast(size_t, cython.address(beta)), cython.cast(size_t, cython.address(C[0, 0])), ldc)
   else:
-    #    cupy_cublas.syrk(trans, A.T, C.T, alpha, beta, 1 if uplo != b'U' else 0)
-    scipy_blas.dsyrk(alpha, A.T, beta, C.T, 1 if trans != b'N' else 0, 1 if uplo != b'U' else 0, 1)
+    print(f"\nDSYRK A.shape={A.shape} trans={trans} C.shape={C.shape}  uplo={uplo} alpha={alpha}  beta={beta}") # DEBUG
+
+    # DEBUG Temporarily swapping for a new version
+    # CUPY signature doc: trans, a, out=None, alpha=1.0, beta=0.0, lower=False
+    # cu_a = cupy.asarray(A.T)
+    # cu_c = cupy.asarray(C.T)
+    # print("\ndsyrk IN a:", cu_a, cu_a.shape)
+    # print("dsyrk IN c:", cu_c, cu_c.shape)
+    # print("dsyrk IN trans:", trans)
+    # # Note input matrices are transposed, so uplo is inverted.
+    # ########## assert cu_a.shape._0 if trans == b'T'
+    # cupy_blas.syrk(a=cu_a, out=cu_c, trans=trans.decode(), alpha=alpha, beta=beta, lower=uplo != b'L')
+    # print("dsyrk C flags, shape: ", C.flags, C.T.shape)
+    # cupy.asnumpy(cu_c, out=C.T)
+    # cupy.asnumpy(cu_c, out=C.T)
+    # out_c = cupy.asnumpy(cu_c, out=C.T)
+    # print("OUT CUPY C:", C)
+    # Making old version for comparison
+    # C_orig = scipy_blas.dsyrk(alpha, A.T, beta, C.T, 1 if trans != b'N' else 0, 1 if uplo != b'U' else 0, 1)
+    # print("OUT SCIPY C:", C_orig)
+    # print(f"trans={trans}  uplo={uplo}  C_new.shape={C.shape}  C_orig.shape={C_orig.shape}\n")
+    # assert C_orig.shape == C.shape, "shapes match"
+    # assert np.array_equiv(C_orig, C), "content match"
+
+    # SCYPY signature doc:  alpha, a, beta=None, c=None, trans=None, lower=None, overwrite_c=None
+    # print("\nIN alpha, A, beta, C: ", alpha, A, beta, C)
+    # print("A.shape, C.shape: ", A.shape, C.shape)
+
+    # Version FROM main
+    # assert np.isfortran(C.T), "Fortran layout is required for the accumulator."
+    c = scipy_blas.dsyrk(alpha, A, beta, C, trans=trans == b'T', lower=uplo != b'U', overwrite_c=True)
+    # NOTE the procedure may refuse to overwrite input if layout is not Fortran or element type does not match.
+    # Otherwise, C is not overwritten and result is returned as function value instead.
+    assert c is C, "return result by reference"
+
+    # print("OUT alpha, A, beta, C: ", alpha, A, beta, C)
 
 @cython.cfunc
 @cython.inline
@@ -300,7 +338,7 @@ def calc_central_moments(raw, ave, n, lm, rm, i, j):
   # Expressions for conversions raw moments to central moments in the
   # Horner representation generated with sympy
   if False:
-    pass # Helps formatting for all cases
+    pass # Helps with formatting for all cases
   elif lm == 1 and rm == 1:  # E(X Y)
     M_11 = raw[0, :, 0, :]   # 0
     m = M_11[i, j] * inv_n - ave_i * ave_j
@@ -357,12 +395,14 @@ class _bivar_sum_base(_AccBase):
 
     # Buffers for operations to avoid reallocations
     self._buf    = np.empty((3, trace_len), dtype=self._dtype)  # BLAS ops buffer
-    self._layout = np.empty((exp_traces, moment * trace_len + 1), dtype=self._dtype)
+    self._layout = np.empty((exp_traces, moment * trace_len + 1), dtype=self._dtype, order='F')
     self._retm   = np.empty((2, 2, trace_len * (trace_len + 1) // 2), dtype=np.float64)
 
     # Accumulators
     # acc0 is upper triangle of accs[:,:-1], acc1 is lower triangle of accs[:, 1:]
-    self._accs   = np.zeros((classifier_len, moment * trace_len + 2, moment * trace_len + 1), dtype=self._dtype)
+    #########################           -1 ??????????? /Petr
+    self._accs   = np.zeros((classifier_len, moment * trace_len + 2, moment * trace_len + 1), dtype=self._dtype, order='F')
+    #########################                                         + 2 ???????????? /Petr
 
   @staticmethod
   def estimate_mem_size(tr_len, cl_len=1, moment=2, acc_dtype=np.float64):
@@ -388,7 +428,7 @@ class _bivar_sum_base(_AccBase):
     self.total_count += batch_cnt
 
     if len(self._layout) < batch_cnt:
-      self._layout = np.empty((batch_cnt, moment * tr_len + 1), dtype=self._layout.dtype)
+      self._layout = np.empty((batch_cnt, moment * tr_len + 1), dtype=self._layout.dtype, order='F')
 
     tr_lyt = self._layout[:batch_cnt]
     tr_lyt[:, 0] = 1
@@ -435,14 +475,14 @@ class _bivar_sum_base(_AccBase):
     moments = [m - 1 for m in moments]
     ma, tr_len, cl_len = self.moment, self.trace_len, self._accs.shape[0]
     # 2D stat should return a separate piece of memory to avoid buffer corruption
-    # while normalizing coskeweness and higher moments
+    # while normalizing co-skewness and higher moments
     cm, buf = np.empty((2, maxm, tr_len), dtype=np.float64), self._buf
 
     for ii in range(cl_len):
       n0, n1 = self.counts(ii)
       acc0, acc1 = self._accs[ii], self._accs[ii, 1:].T
 
-      # Convert to double if accumulator is float
+      # Convert to double if accumulator is a float
       acc0 = np.asarray(acc0, dtype=np.float64)
       acc1 = np.asarray(acc1, dtype=np.float64)
 
@@ -484,7 +524,7 @@ class _bivar_sum_base(_AccBase):
         n0, n1 = self.counts(ii)
         acc0, acc1 = self._accs[ii], self._accs[ii, 1:].T
 
-        # Convert to double if accumulator is float
+        # Convert to double if accumulator is a float
         acc0 = np.asarray(acc0, dtype=np.float64)
         acc1 = np.asarray(acc1, dtype=np.float64)
 
@@ -975,7 +1015,7 @@ class bivar_txtbk(_BivarNpassBase):
 
 ##################################### VTK #####################################
 # Used for benchmarking only
-if is_vtk_installed():
+if use_vtk():
   import vtk
   from vtk.util.numpy_support import numpy_to_vtk as np2vtk, vtk_to_numpy as vtk2np
 

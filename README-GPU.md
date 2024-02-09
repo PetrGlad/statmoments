@@ -28,8 +28,9 @@ cupy.cuda.get_local_runtime_version()
 cupy.cuda.device.Device().compute_capability
 ```
 
-Reinstallation or library changes may cause CUDA to load. For example you may get an "Unknown Error". 
-In that case cleaning compiled kernel cache may help:
+Reinstallation, library changes, or drive upgrade may cause CUDA to load. 
+For example, you may get an "CUDA error: unknown error" or "Error: cudaErrorUnknown: unknown error".
+In that case cleaning compiled kernel cache (and in some cases also rebooting the system) may help:
 ```
 rm -r "$HOME/.nv"
 ```
