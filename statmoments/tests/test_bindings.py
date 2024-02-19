@@ -38,15 +38,15 @@ class Test_bindings(unittest.TestCase):
     c_expected = np.array([[23]], dtype=float)
     self.assertTrue(np.array_equal(C, c_expected))
 
-  def test_dsyrk_shape(self):
+  def test_dsyrk_shape(self):  # SHOULD PASS # 2023-02-21
     A = np.array([[3, 4, 5]], dtype=float)
     C = np.array([[13]], dtype=float)
-    dsyrk(A, C, uplo=b'D', trans=b'N', alpha=2.0, beta=5.0)
+    dsyrk(A, C, uplo=b'L', trans=b'N', alpha=2.0, beta=5.0)
     c_expected = np.array([[165]], dtype=float)
     self.assertTrue(np.array_equal(C, c_expected))
 
   def test_dsyrk_shape_2(self):
-    A = np.array([[3, 4, 5]], dtype=float)  # TODO ....trying to not specify order='F'
+    A = np.array([[3, 4, 5]], dtype=float)
     C = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=float, order='F')
     dsyrk(A, C, uplo=b'U', trans=b'T', alpha=2.0, beta=5.0)
     c_expected = np.array([[23, 34, 45], [4, 57, 70], [7, 8, 95]], dtype=float)
@@ -83,7 +83,8 @@ class Test_bindings(unittest.TestCase):
       if trans == b'T':
         A = rng.choice([1, 2, 3, 4, 5], (k, n))
       else:
-        A = rng.choice([1, 2, 3, 4, 5], (n, k)).astype(dtype=np.float64)
+        A = rng.choice([1, 2, 3, 4, 5], (n, k))
+      A = A.astype(dtype=np.float64)
       C = rng.choice([1, 2, 3, 4, 5], (n, n)).astype(dtype=np.float64, order='F')
       print("\nC orig=\n", C)
       c_expected = np_syrk(A, C, alpha, beta, upper=upper == b'U', trans=trans == b'T', overwrite=False)

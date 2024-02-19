@@ -134,16 +134,15 @@ def ssyrk(A, C, uplo, trans=b'N', alpha=1.0, beta=1.0):
 def dsyrk(A, C, uplo, trans=b'N', alpha=1.0, beta=1.0):
   """ C = alpha * trans(A * A^T) + beta * C """
 
-  # cython.declare(n=cython.int, k=cython.int, lda=cython.int, ldc=cython.int)
-  # n = cython.cast(cython.int, C.shape[0])
-  # k = cython.cast(cython.int, A.shape[0] if trans == b'N' else A.shape[1])
-  # lda = cython.cast(cython.int, A.shape[1])
-  # ldc = cython.cast(cython.int, C.shape[1])
+  cython.declare(n=cython.int, k=cython.int, lda=cython.int, ldc=cython.int)
+  n = cython.cast(cython.int, C.shape[0])
+  k = cython.cast(cython.int, A.shape[0] if trans == b'N' else A.shape[1])
+  lda = cython.cast(cython.int, A.shape[1])
+  ldc = cython.cast(cython.int, C.shape[1])
 
   #assert (A.shape[1] if trans == b'N' else A.shape[0]) == n
   #assert C.shape[1] == n
   # !!! uplo 'L' and 'U' mixed up (BLAS dsyrk gets transposed matrices).
-
   # if USE_GPU:
   #   cupy_blas.syrk(trans, A.T, C.T, alpha, beta, 1 if uplo != b'U' else 0)
   # elif
@@ -168,41 +167,44 @@ def dsyrk(A, C, uplo, trans=b'N', alpha=1.0, beta=1.0):
   #        cython.cast(size_t, cython.address(beta)), cython.cast(size_t, cython.address(C[0, 0])), ldc)
   else:
     print(f"\nDSYRK A.shape={A.shape} trans={trans} C.shape={C.shape}  uplo={uplo} alpha={alpha}  beta={beta}") # DEBUG
+    # trans = b'N' if trans == b'T' else b'T' # DEBUG Flipping trans ##################
 
-    # DEBUG Temporarily swapping for a new version
-    # CUPY signature doc: trans, a, out=None, alpha=1.0, beta=0.0, lower=False
-    # cu_a = cupy.asarray(A.T)
-    # cu_c = cupy.asarray(C.T)
-    # print("\ndsyrk IN a:", cu_a, cu_a.shape)
-    # print("dsyrk IN c:", cu_c, cu_c.shape)
-    # print("dsyrk IN trans:", trans)
-    # # Note input matrices are transposed, so uplo is inverted.
-    # ########## assert cu_a.shape._0 if trans == b'T'
-    # cupy_blas.syrk(a=cu_a, out=cu_c, trans=trans.decode(), alpha=alpha, beta=beta, lower=uplo != b'L')
-    # print("dsyrk C flags, shape: ", C.flags, C.T.shape)
-    # cupy.asnumpy(cu_c, out=C.T)
-    # cupy.asnumpy(cu_c, out=C.T)
-    # out_c = cupy.asnumpy(cu_c, out=C.T)
-    # print("OUT CUPY C:", C)
-    # Making old version for comparison
-    # C_orig = scipy_blas.dsyrk(alpha, A.T, beta, C.T, 1 if trans != b'N' else 0, 1 if uplo != b'U' else 0, 1)
-    # print("OUT SCIPY C:", C_orig)
-    # print(f"trans={trans}  uplo={uplo}  C_new.shape={C.shape}  C_orig.shape={C_orig.shape}\n")
-    # assert C_orig.shape == C.shape, "shapes match"
-    # assert np.array_equiv(C_orig, C), "content match"
+    # trans = b'T' # DEBUG
 
-    # SCYPY signature doc:  alpha, a, beta=None, c=None, trans=None, lower=None, overwrite_c=None
-    # print("\nIN alpha, A, beta, C: ", alpha, A, beta, C)
-    # print("A.shape, C.shape: ", A.shape, C.shape)
+    if trans == b'N':
+      assert (A.shape[0], A.shape[0]) == C.shape
+    else:
+      assert (A.shape[1], A.shape[1]) == C.shape
+    if False:
+      # CUPY signature doc: trans, a, out=None, alpha=1.0, beta=0.0, lower=False
+      cu_a = cupy.asarray(A)
+      cu_c = cupy.asarray(C)
+      print("\nDSYRK IN a:", cu_a, cu_a.shape)
+      print("DSYRK IN c:", cu_c, cu_c.shape)
+      print("DSYRK IN trans:", trans)
+      # Note input matrices are transposed, so uplo is inverted.
+      ########## assert cu_a.shape._0 if trans == b'T'
+      cupy_blas.syrk(a=cu_a, out=cu_c, trans=trans.decode(), alpha=alpha, beta=beta, lower=uplo == b'L')
+      print("DSYRK C flags, shape: ", C.flags, C.shape)
+      out_c = cupy.asnumpy(cu_c, out=C)
+      assert out_c is C
+      print("DSYRK OUT CUPY C:", C)
 
-    # Version FROM main
-    # assert np.isfortran(C.T), "Fortran layout is required for the accumulator."
-    c = scipy_blas.dsyrk(alpha, A, beta, C, trans=trans == b'T', lower=uplo != b'U', overwrite_c=True)
-    # NOTE the procedure may refuse to overwrite input if layout is not Fortran or element type does not match.
-    # Otherwise, C is not overwritten and result is returned as function value instead.
-    assert c is C, "return result by reference"
+      # SCYPY signature doc:  alpha, a, beta=None, c=None, trans=None, lower=None, overwrite_c=None
+      # print("\nIN alpha, A, beta, C: ", alpha, A, beta, C)
+      # print("A.shape, C.shape: ", A.shape, C.shape)
+    else:
+      # assert trans == b'N'
+      # trans = b'T' # DEBUG
 
-    # print("OUT alpha, A, beta, C: ", alpha, A, beta, C)
+      # Transposing row-major inputs and flipping uplo flag to adapt for BLAS that
+      # expects Fortran (column-major) layout.
+      # The scipy_blas.dsyrk procedure may refuse to overwrite input if layout is not Fortran
+      # or element type does not match. If that happens, original C is not updated and the result is
+      # returned as function value instead.
+      c = scipy_blas.dsyrk(alpha, A.T, beta, C, trans=True, lower=uplo != b'U', overwrite_c=True)
+      assert c is C, "return dsyrk result by reference"
+      print("OUT alpha, A, beta, C: ", alpha, A, beta, C)
 
 @cython.cfunc
 @cython.inline
@@ -241,7 +243,7 @@ def _block_index(i, tr_len):
 
 
 ############################### COMMON CLASS ##################################
-class _AccBase(object):
+class _AccBase:
   def __init__(self, tr_len, cl_len, moment=2, normalize=True, **kwargs):
     self.total_count = 0
     self.moment = moment
@@ -824,7 +826,7 @@ def _uni2bivar(traces, tmp, ret, m1, m2):
   n = cython.cast(cython.int, traces.shape[1])
   triuflatten, C = _triuflatten_gen(n), tmp
   for j in range(m):
-    dsyrk(traces[j, np.newaxis] ** m1, C, b'L', b'N', 1.0, 0.0)                               # m1 == m2
+    dsyrk(traces[j, np.newaxis] ** m1, C, b'L',  alpha=1.0, beta=0.0)                               # m1 == m2
     if cython.compiled:
       ret[j, :] = triuflatten(C.base)
     else:
@@ -1020,7 +1022,7 @@ if use_vtk():
   from vtk.util.numpy_support import numpy_to_vtk as np2vtk, vtk_to_numpy as vtk2np
 
 
-class bivar_vtk(object):
+class bivar_vtk:
   """A class, using vtk multivariate kernel. Covariance ONLY!!!"""
   def __init__(self, tr_len, classifier_len, moment=2, **kwargs):
     self.moment = moment # In fact, only 1

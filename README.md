@@ -47,33 +47,36 @@ The numeric accuracy of results is dependent on the coefficient of variation (CO
 ### Performing univariate data analysis
 
 ```python
-  # Input data parameters
-  tr_count = 100   # M input waveforms
-  tr_len   = 5     # N features or points in the input waveforms
-  cl_len   = 2     # L hypotheses how to split input waveforms
+import statmoments
+import numpy as np
 
-  # Create engine, which can compute up to kurtosis
-  uveng = statmoments.Univar(tr_len, cl_len, moment=4)
+# Input data parameters
+tr_count = 100   # M input waveforms
+tr_len   = 5     # N features or points in the input waveforms
+cl_len   = 2     # L hypotheses how to split input waveforms
 
-  # Process input data and split hypotheses
-  uveng.update(wforms1, classification1)
+# Create engine, which can compute up to kurtosis
+uveng = statmoments.Univar(tr_len, cl_len, moment=4)
 
-  # Process more input data and split hypotheses
-  uveng.update(wforms2, classification2)
+# Process input data and split hypotheses
+uveng.update(wforms1, classification1)
 
-  # Get statistical moments
-  mean       = [cm.copy() for cm in uveng.moments(moments=1)]
-  skeweness  = [cm.copy() for cm in uveng.moments(moments=3)]
+# Process more input data and split hypotheses
+uveng.update(wforms2, classification2)
 
-  # Detect statistical differences in the first-order t-test
-  for i, tt in enumerate(statmoments.stattests.ttests(uveng, moment=1)):
-    if np.any(np.abs(tt) > 5):
-      print(f"Data split {i} has different means")
+# Get statistical moments
+mean       = [cm.copy() for cm in uveng.moments(moments=1)]
+skeweness  = [cm.copy() for cm in uveng.moments(moments=3)]
 
-  # Process more input data and split hypotheses
-  uveng.update(wforms3, classification3)
+# Detect statistical differences in the first-order t-test
+for i, tt in enumerate(statmoments.stattests.ttests(uveng, moment=1)):
+if np.any(np.abs(tt) > 5):
+  print(f"Data split {i} has different means")
 
-  # Get updated statistical moments and t-tests
+# Process more input data and split hypotheses
+uveng.update(wforms3, classification3)
+
+# Get updated statistical moments and t-tests
 ```
 
 ### Performing bivariate data analysis
