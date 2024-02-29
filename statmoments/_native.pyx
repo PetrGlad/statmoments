@@ -11,10 +11,10 @@ import numpy as np
 import scipy.linalg.blas as scipy_blas
 from scipy.special import binom
 
-cython.declare(USE_VTK = cython.bint)
+cython.declare(USE_VTK = cython.int)
 USE_VTK = 0
-cython.declare(USE_GPU = cython.bint)
-USE_GPU = 1 ##############################################
+cython.declare(USE_GPU = cython.int)
+USE_GPU = 0
 
 def use_vtk():
   if not USE_VTK:
@@ -133,19 +133,15 @@ def ssyrk(A, C, uplo, trans=b'N', alpha=1.0, beta=1.0):
                trans=cython.char, alpha=cython.double, beta=cython.double)
 def dsyrk(A, C, uplo, trans=b'N', alpha=1.0, beta=1.0):
   """ C = alpha * trans(A * A^T) + beta * C """
-
   cython.declare(n=cython.int, k=cython.int, lda=cython.int, ldc=cython.int)
   n = cython.cast(cython.int, C.shape[0])
   k = cython.cast(cython.int, A.shape[0] if trans == b'N' else A.shape[1])
   lda = cython.cast(cython.int, A.shape[1])
   ldc = cython.cast(cython.int, C.shape[1])
-
   #assert (A.shape[1] if trans == b'N' else A.shape[0]) == n
   #assert C.shape[1] == n
-  # !!! uplo 'L' and 'U' mixed up (BLAS dsyrk gets transposed matrices).
-  # if USE_GPU:
-  #   cupy_blas.syrk(trans, A.T, C.T, alpha, beta, 1 if uplo != b'U' else 0)
-  # elif
+
+  # !!! uplo 'L' and 'U' mixed up !!!
   if cython.compiled:
     cython_blas.dsyrk(cython.address(uplo), cython.address(trans), cython.address(n), cython.address(k),
                       cython.address(alpha), cython.address(A[0, 0]), cython.address(lda),
@@ -475,13 +471,19 @@ class _bivar_sum_base(_AccBase):
       raise ValueError("The moment should be less or equal than indicated in constructor.")
 
     moments = [m - 1 for m in moments]
-    ma, tr_len, cl_len = self.moment, self.trace_len, self._accs.shape[0]
+    ma, min_cnt = self.moment, self.acc_min_count
+    tr_len, cl_len = self.trace_len, self._accs.shape[0]
     # 2D stat should return a separate piece of memory to avoid buffer corruption
     # while normalizing co-skewness and higher moments
     cm, buf = np.empty((2, maxm, tr_len), dtype=np.float64), self._buf
 
     for ii in range(cl_len):
       n0, n1 = self.counts(ii)
+      if min(n0, n1) < min_cnt:
+        cm[:, moments] = 0
+        yield cm[:, moments]
+        continue
+
       acc0, acc1 = self._accs[ii], self._accs[ii, 1:].T
 
       # Convert to double if accumulator is a float
@@ -521,12 +523,17 @@ class _bivar_sum_base(_AccBase):
     ma, min_cnt = self.moment, self.acc_min_count
 
     for ii in range(cl_len):
+      n0, n1 = self.counts(ii)
+      acc0, acc1 = self._accs[ii], self._accs[ii, 1:].T
+
+      if min(n0, n1) < min_cnt:
+        retm[:] = 0
+        yield retm
+        continue
+
       # The left and the right degree of the product terms, e.g. xi^1 * xj^3
       for jj, (lm, rm) in enumerate(zip(*moments)):
-        n0, n1 = self.counts(ii)
-        acc0, acc1 = self._accs[ii], self._accs[ii, 1:].T
-
-        # Convert to double if accumulator is a float
+        # Convert to double if accumulator is float
         acc0 = np.asarray(acc0, dtype=np.float64)
         acc1 = np.asarray(acc1, dtype=np.float64)
 
@@ -600,10 +607,11 @@ class bivar_sum_detrend(_bivar_sum_base):
   def _moments(self, moments, normalize):
     m1idx = [i for i, m in enumerate(moments) if m == 1]
     has_m1 = len(m1idx) != 0
+    dbuf = self._dbuf if len(self._dbuf) > 0 else 0
     for res in super()._moments(moments, normalize):
       if has_m1:
         # Restore offset if mean requested
-        res[:, m1idx] += self._dbuf
+        res[:, m1idx] += dbuf
       yield res
 
 
@@ -760,7 +768,7 @@ class bivar_cntr(_AccBase):
     return self._cls_count[i]
 
   def _moments(self, moments, normalize):
-    maxm = np.max(moments)
+    maxm, min_cnt = np.max(moments), self.acc_min_count
     if self.moment * 2 < maxm:
       raise ValueError("The moment should be less or equal than indicated in constructor.")
 
@@ -772,23 +780,27 @@ class bivar_cntr(_AccBase):
     retm = np.empty((2, len(moments), tr_len), dtype=np.float64)
 
     for ii in range(cl_len):
+      nn = self._cls_count[ii]
+      if min(nn) < min_cnt:
+        retm[:] = 0
+        yield retm
+        continue
+
       for _i in range(2):
         cm = retm[_i]
         for jj, m in enumerate(moments):
           if m == -1:
             cm[jj] = self._accs1d[ii][_i]
           else:
-            nn = self._cls_count[ii][_i]
-            cm[jj] = 1 / nn * self._accs2d[ii][_i, m // 2, :, m // 2 + m % 2, :].diagonal()
+            cm[jj] = 1 / nn[_i] * self._accs2d[ii][_i, m // 2, :, m // 2 + m % 2, :].diagonal()
 
             if m >= 1 and normalize:
-              sd = np.sqrt(1 / nn * self._accs2d[ii][_i, 0, :, 0, :].diagonal())
+              sd = np.sqrt(1 / nn[_i] * self._accs2d[ii][_i, 0, :, 0, :].diagonal())
               cm[jj] /= sd ** (m + 2)
 
       yield retm
 
   def _comoments(self, moments, normalize):
-    #    self._retm[:] = 0  # TODO: Check if needed
     retm = self._retm
     tr_len, min_cnt = self.trace_len, self.acc_min_count
     triuflatten = _triuflatten_gen(tr_len)
@@ -799,9 +811,13 @@ class bivar_cntr(_AccBase):
         if n0 >= min_cnt:
           C = _calc_comoments(1.0 / n0 * accs2d[0], lm, rm, normalize)
           retm[0, jj] = triuflatten(C)
+        else:
+          retm[0, jj] = 0
         if n1 >= min_cnt:
           C = _calc_comoments(1.0 / n1 * accs2d[1], lm, rm, normalize)
           retm[1, jj] = triuflatten(C)
+        else:
+          retm[1, jj] = 0
       yield self._retm[:, :len(moments[0])]
 
 
@@ -858,7 +874,7 @@ class _BivarNpassBase(_AccBase):
   def __init__(self, tr_len, cl_len, **kwargs):
     super().__init__(tr_len, cl_len, **kwargs)
     self.traces = np.empty((1, tr_len))[1:]
-    self.cls    = np.asarray([bytearray(b'2')], dtype=np.uint8)[1:]  # 2 is non existing element
+    self.cls    = np.asarray([bytearray(b'2' * cl_len)], dtype=np.uint8)[1:]  # 2 is non existing element
     self._tmpsq = np.empty((tr_len, tr_len))  # Has to be square for syrk
     self._retm  = np.empty((2, 2, tr_len * (tr_len + 1) // 2))
 
@@ -884,6 +900,7 @@ class _BivarNpassBase(_AccBase):
     return self.total_count - c1, c1
 
   def _moments(self, moments, normalize):
+    min_cnt = self.acc_min_count
     tr_len, cl_len = self.trace_len, self.classifiers_len
 
     # 2D stat should return a separate piece of memory to avoid buffer corruption
@@ -893,9 +910,16 @@ class _BivarNpassBase(_AccBase):
     for ii in range(cl_len):
       cls0 = (self.cls[:, ii] == 0)
       traces_cl = [self.traces[cls0], self.traces[~cls0]]
+      nn = [len(ts) for ts in traces_cl]
+
+      if min(nn) < min_cnt:
+        retm[:, :len(moments)] = 0
+        yield retm[:, :len(moments)]
+        continue
+
       for _i in range(2):
         tr_set = traces_cl[_i]
-        n, cm = len(tr_set), retm[_i]
+        n, cm = nn[_i], retm[_i]
         tr_set_mean = np.mean(tr_set, axis=0)
 
         for jj, m in enumerate(moments):
@@ -928,14 +952,17 @@ class bivar_2pass(_BivarNpassBase):
     return mem_base + mem_ttstd * 8
 
   def _comoments(self, moments, normalize):
-    C = self._tmpsq
-    tr_len, cl_len = self.trace_len, self.cls.shape[1]
+    min_cnt, C = self.acc_min_count, self._tmpsq
+    tr_len, cl_len = self.trace_len, self.classifiers_len
     for ii in range(cl_len):
       for _i in range(2):
         mft = _sort_meanfree(self.traces[self.cls[:, ii] == _i], False)
         m, n = mft.shape
-        triuflatten = _triuflatten_gen(n)
         retm = self._retm[_i]
+        triuflatten = _triuflatten_gen(n)
+        if m < min_cnt:
+          retm[:] = 0
+          continue
 
         for jj, (lm, rm) in enumerate(zip(*moments)):
           if lm == rm:
@@ -948,7 +975,7 @@ class bivar_2pass(_BivarNpassBase):
             sd = np.std(mft, axis=0)
             retm[jj] /= triuflatten(np.outer(sd ** lm, sd ** rm))
 
-    yield self._retm[:, :len(moments[0])]
+      yield self._retm[:, :len(moments[0])]
 
 
 class bivar_txtbk(_BivarNpassBase):
@@ -980,8 +1007,8 @@ class bivar_txtbk(_BivarNpassBase):
     return self._tri[:m]
 
   def _comoments(self, moments, normalize):
-    C = self._tmpsq
-    tr_len, cl_len = self.trace_len, self.cls.shape[1]
+    min_cnt, C = self.acc_min_count, self._tmpsq
+    tr_len, cl_len = self.trace_len, self.classifiers_len
     for ii in range(cl_len):
       cl_set = [(self.cls[:, ii] == 0)]
       cl_set.append(~(cl_set[0]))
@@ -990,6 +1017,9 @@ class bivar_txtbk(_BivarNpassBase):
         m, n = mft.shape
         retm = self._retm[_i]
         tri  = self._realloc_tri(len(mft))
+        if m < min_cnt:
+          retm[:] = 0
+          continue
 
         for jj, (lm, rm) in enumerate(zip(*moments)):
           tri = _uni2bivar(mft, C, tri, lm, rm) if lm == rm else _uni2bivar_neq(mft, C, tri, lm, rm)
@@ -1001,18 +1031,7 @@ class bivar_txtbk(_BivarNpassBase):
             sd = np.std(mft, axis=0)
             retm[jj] /= triuflatten(np.outer(sd ** lm, sd ** rm))
 
-    # Outdated code below, but still gives a hint how to ensure the results
-    # # Double-check result with scipy (fix _lt* with C)
-    # from scipy.stats.stats import _ttest_ind_from_stats as _ttest_stats, _unequal_var_ttest_denom as _uneq_denom
-    # axis, ddof = 0, 1 # ddof=1 to get same t-t result with _uneq_denom
-    # m1, m2 = np.mean(_lt0, axis), np.mean(_lt1, axis)
-    # n1, n2 = _lt0.shape[axis], _lt1.shape[axis]
-    # v1, v2 = np.var(_lt0, axis, ddof), np.var(_lt1, axis, ddof)
-    # df, denom = _uneq_denom(v1, n1, v2, n2)
-    # tstat, pv = _ttest_stats(m1, m2, denom, df)
-    # return tstat
-
-    yield self._retm[:, :len(moments[0])]
+      yield self._retm[:, :len(moments[0])]
 
 
 ##################################### VTK #####################################
@@ -1277,8 +1296,9 @@ class univar_sum_detrend(univar_sum):
   def _moments(self, moments, normalize):
     m1idx = [i for i, m in enumerate(moments) if m == 1]
     has_m1 = len(m1idx) != 0
+    dbuf_nonempty = len(self._dbuf) != 0
     for res in super()._moments(moments, normalize):
-      if has_m1:
+      if has_m1 and dbuf_nonempty:
         # Restore offset if mean requested
         res[:, m1idx] += self._dbuf
       yield res

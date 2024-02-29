@@ -16,6 +16,8 @@ def bivar_benchmark(debug_run=False):
   if use_vtk():
     kernels.append(statmoments.bivar_vtk)
 
+  engines = {(k.__name__, m): bl.EngineFactory(*params, kernel=k, moment=m)
+             for k in kernels for m in [2, 3, 4]}
   engines = [bl.EngineFactory(*params, kernel=k, moment=m)
              for k in kernels
              for m in [2, 3, 4]]
