@@ -35,3 +35,8 @@ In that case cleaning compiled kernel cache (and in some cases also rebooting th
 rm -r "$HOME/.nv"
 ```
 
+# Links
+
+* [Installing latest ncu profiler (the one from Ubuntu does not work)](https://developer.nvidia.com/nvidia-development-tools-solutions-err_nvgpuctrperm-permission-issue-performance-counters)
+* [Allow using performance counters](https://developer.nvidia.com/nvidia-development-tools-solutions-err_nvgpuctrperm-permission-issue-performance-counters)
+	

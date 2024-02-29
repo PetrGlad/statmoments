@@ -24,16 +24,16 @@ def bytes2classifiers(byte_line):
   return bin(int(hex_line, 16))[2:].zfill(len(byte_line) * 8)
 
 
-def make_hypotheses(hlen):
+def make_hypotheses(hlen):  # Used as self._gen_classifiers, make_classifiers
   return bytes2classifiers(_urandom((hlen + 7) // 8))[:hlen]
 
 
 class EngineFactory:
   def __init__(self, make_trace, make_classifiers, factory, **options):
-    self._gen_trace = make_trace
-    self._gen_classifiers = make_classifiers
-    self._factory = factory
-    self._options = options
+    self._gen_trace = make_trace  # e.g. make_trace_ushort
+    self._gen_classifiers = make_classifiers  # e.g. make_hypotheses
+    self._factory = factory  # e.g. statmoments._statmoments_impl.Bivar
+    self._options = options  # e.g. {'kernel': <class 'statmoments._native.bivar_sum'>, 'moment': 2}
 
   def name(self):
     return self._options['kernel'].__name__
@@ -107,7 +107,7 @@ def benchmark(test_filter, benchset, repeat=1):
                                 (sum(update_times) + sum(ttest_times)) / tr_count,
                                 sum(update_times), min(update_times), max(update_times),
                                 sum(ttest_times), min(ttest_times), max(ttest_times),
-                                perf_counter() - run_start # Note that this includes data generation
+                                perf_counter() - run_start  # Note that this includes data generation
                                 ])
         report_file.flush()
         # Force garbage collection
